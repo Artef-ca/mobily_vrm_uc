@@ -1,0 +1,182 @@
+stages:
+  - version
+  - build
+  - push
+  - cleanup
+  - deploy
+
+
+# CI: Continuous Integration Pipeline
+
+## Increase the patch version of the image
+bump_version:
+  stage: version
+
+  script:
+    - echo "Fetching current version from CI variable..."
+    - CURRENT_VERSION=$IMAGE_VERSION
+    - echo "Project ID $CI_PROJECT_ID"
+    - echo "Current version $CURRENT_VERSION"
+    - echo "Bumping version..."
+    - |
+      IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+      PATCH=$((PATCH + 1))
+      NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+      echo "New version: $NEW_VERSION"
+    - echo "Updating the CI/CD variable with the new version..."
+    - |
+      RESPONSE_CODE=$(curl --write-out "%{http_code}" --silent --output /dev/null \
+        --request PUT \
+        --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        --form "value=$NEW_VERSION" \
+        "https://gitlab.the-line.com/api/v4/projects/$CI_PROJECT_ID/variables/IMAGE_VERSION")
+      
+      if [ "$RESPONSE_CODE" -ne 200 ]; then
+        echo "Error: Failed to update IMAGE_VERSION. HTTP Response Code: $RESPONSE_CODE"
+        exit 1
+      fi
+  
+  rules:
+    # 1) On main, but if only files under "ansible/" changed, skip
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - 'ansible/**/*'
+      when: never
+
+    # 2) On main for any other change, run
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - '**/*'
+      when: on_success
+
+    # 3) All other branches: never
+    - when: never
+
+  tags:
+    - theline-gitlab-runner
+
+## Build the Docker image
+build_image:
+  stage: build
+
+  needs:
+    - bump_version
+
+  script:
+    - docker build -t $DOCKER_IMAGE .
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - 'ansible/**/*'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - '**/*'
+      when: on_success
+
+  tags:
+    - theline-gitlab-runner
+
+## Push the Docker image to the registry
+push_image:
+  stage: push
+
+  needs:
+    - build_image
+
+  before_script:
+    - echo $GCLOUD_SERVICE_KEY | base64 -d > ${HOME}/gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file ${HOME}/gcloud-service-key.json
+    - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin $CI_REGISTRY_URL
+
+  script:
+    - docker push $DOCKER_IMAGE
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - 'ansible/**/*'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - '**/*'
+      when: on_success
+
+  tags:
+    - theline-gitlab-runner
+
+## Cleanup the Docker image
+cleanup_image:
+  stage: cleanup
+
+  needs:
+    - push_image
+
+  script:
+    - docker rmi $DOCKER_IMAGE
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - 'ansible/**/*'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - '**/*'
+      when: on_success
+
+  tags:
+    - theline-gitlab-runner
+
+# CD: Continuous Deployement Pipeline
+deploy_dev:
+  stage: deploy
+
+  before_script:
+    - echo $GCLOUD_SERVICE_KEY | base64 -d > ${HOME}/gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file ${HOME}/gcloud-service-key.json
+
+  script:
+    - echo "Deploying the Docker image to backend..."
+    - cd ansible && ansible-playbook deploy_dev.yml
+    - echo "Container deployed."
+
+  rules:
+    # Run when only ansible files change
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - 'ansible/**/*'
+        - '.gitlab-ci.yml'
+      when: manual
+    # Run after build pipeline for other changes
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - '**/*'
+      when: manual
+  
+  tags:
+    - theline-gitlab-runner
+
+deploy_prod:
+  stage: deploy
+
+  needs:
+    - deploy_dev
+
+  before_script:
+    - echo $GCLOUD_SERVICE_KEY | base64 -d > ${HOME}/gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file ${HOME}/gcloud-service-key.json
+    - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin $CI_REGISTRY_URL
+
+  script:
+    - echo "Deploying the Docker image to backend..."
+    - cd ansible && ansible-playbook deploy_prod.yml
+    - echo "Container deployed."
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+  tags:
+    - theline-gitlab-runner

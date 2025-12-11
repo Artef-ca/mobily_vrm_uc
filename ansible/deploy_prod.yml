@@ -1,0 +1,42 @@
+- name: Retag “-dev” image as “-prod” and deploy to Cloud Run
+  hosts: localhost
+  vars_files: vars.yml            # contains docker_image ending in -dev
+  tasks:
+
+    # ── derive prod tag ──────────────────────────────────────────────
+    - set_fact:
+        docker_image_prod: "{{ docker_image | regex_replace('-dev$', '-prod') }}"
+
+    # ── pull, retag, push ───────────────────────────────────────────
+    - name: Pull the dev image
+      shell: docker pull {{ docker_image }}
+
+    - name: Retag as prod
+      shell: docker tag {{ docker_image }} {{ docker_image_prod }}
+
+    - name: Push the prod tag
+      shell: docker push {{ docker_image_prod }}
+
+    # ── deploy to Cloud Run using the new tag ───────────────────────
+    - name: Deploy prod image
+      shell: |
+        gcloud run deploy {{ service_name }}-prod \
+          --image={{ docker_image_prod }} \
+          --region={{ gcp_region }} \
+          --platform managed \
+          --allow-unauthenticated \
+          --port={{ container_port }} \
+          --min-instances={{ min_instances_prod }} \
+          --max-instances={{ max_instances_prod }} \
+          --cpu={{ cpu }} \
+          --memory={{ memory }} \
+          --network={{ network }} \
+          --subnet={{ subnet }} \
+          --add-volume=name=config-files,type=cloud-storage,bucket=theline_insights_generator_configs_prod,readonly=true \
+          --add-volume-mount=volume=config-files,mount-path=/app/configs \
+          {% if env_vars_string_prod|length > 0 %}--set-env-vars "{{ env_vars_string_prod }}" {% endif %} \
+          {% if cloudsql_instances|length > 0 %}--add-cloudsql-instances "{{ cloudsql_instances }}" {% endif %} \
+          {% if startup_probe|length > 0 %}--startup-probe "{{ startup_probe }}" {% endif %} \
+          {% if liveness_probe|length > 0 %}--liveness-probe "{{ liveness_probe }}" {% endif %} \
+          {% if vpc_egress is defined %}--vpc-egress "{{ vpc_egress }}" {% endif %} \
+          {% if ingress is defined %}--ingress "{{ ingress }}" {% endif %} \

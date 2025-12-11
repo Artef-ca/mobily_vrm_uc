@@ -1,0 +1,29 @@
+- name: Deploy image to Cloud Run
+  hosts: localhost
+  vars_files: vars.yml
+  tasks:
+
+    - name: Deploy to Cloud Run
+      shell: |
+        gcloud run deploy {{ service_name }}-dev \
+          --image={{ docker_image }} \
+          --region={{ gcp_region }} \
+          --platform managed \
+          --allow-unauthenticated \
+          --port={{ container_port }} \
+          --min-instances={{ min_instances_dev }} \
+          --max-instances={{ max_instances_dev }} \
+          --cpu={{ cpu }} \
+          --memory={{ memory }} \
+          --network={{ network }} \
+          --subnet={{ subnet }} \
+          --add-volume=name=config-files,type=cloud-storage,bucket=theline_insights_generator_configs_dev,readonly=true \
+          --add-volume-mount=volume=config-files,mount-path=/app/configs \
+          {% if env_vars_string_dev|length > 0 %}--set-env-vars "{{ env_vars_string_dev }}" {% endif %} \
+          {% if cloudsql_instances|length > 0 %}--add-cloudsql-instances "{{ cloudsql_instances }}" {% endif %} \
+          {% if startup_probe|length > 0 %}--startup-probe "{{ startup_probe }}" {% endif %} \
+          {% if liveness_probe|length > 0 %}--liveness-probe "{{ liveness_probe }}" {% endif %} \
+          {% if vpc_egress is defined %}--vpc-egress "{{ vpc_egress }}" {% endif %} \
+          {% if ingress is defined %}--ingress "{{ ingress }}" {% endif %} \
+      register: result
+    - debug: var=result.stdout_lines

@@ -1,0 +1,41 @@
+# Core Cloud Run settings
+gcp_project:    "{{ lookup('env', 'GCP_PROJECT') }}"
+gcp_region:     "{{ lookup('env', 'GCP_REGION') | default('me-central2') }}"
+service_name: "{{ lookup('env', 'SERVICE_NAME') | default('my-service') }}"
+docker_image:   "{{ lookup('env', 'DOCKER_IMAGE') }}"
+
+# Container runtime options
+container_port: "{{ lookup('env', 'CONTAINER_PORT') | default(8080, True) | int }}"
+min_instances_dev:  "{{ lookup('env', 'MIN_INSTANCES_DEV')  | default(0,   True) | int }}"
+max_instances_dev:  "{{ lookup('env', 'MAX_INSTANCES_DEV')  | default(3,   True) | int }}"
+
+min_instances_prod:  "{{ lookup('env', 'MIN_INSTANCES_PROD')  | default(0,   True) | int }}"
+max_instances_prod:  "{{ lookup('env', 'MAX_INSTANCES_PROD')  | default(3,   True) | int }}"
+
+# ── runtime env vars (KEY=VAL,KEY=VAL) ──
+env_vars_string_dev: "{{ lookup('env', 'CR_ENV_VARS_DEV') | default('') }}"
+env_vars_string_prod: "{{ lookup('env', 'CR_ENV_VARS_PROD') | default('') }}"
+
+# ── Network ──
+network: "{{ lookup('env', 'NETWORK') | default('') }}"
+
+# ── Subnet ──
+subnet: "{{ lookup('env', 'SUBNET') | default('') }}"
+
+# ── Cloud SQL connections ──
+cloudsql_instances: "{{ lookup('env', 'CLOUDSQL_INSTANCES') | default('') }}"
+
+# ── resource limits ──
+cpu:    "{{ lookup('env', 'CR_CPU')    | default('1') }}"
+memory: "{{ lookup('env', 'CR_MEMORY') | default('512Mi') }}"
+
+# ── health-check / liveness probe ──
+startup_probe:  "{{ lookup('env', 'CR_STARTUP_PROBE')  | default('') }}"
+liveness_probe: "{{ lookup('env', 'CR_LIVENESS_PROBE') | default('') }}"
+
+# ── VPC settings ──
+vpc_egress:    "{{ lookup('env', 'VPC_EGRESS')    | default(omit) }}"
+ingress:       "{{ lookup('env', 'CR_INGRESS')    | default(omit) }}"
+
+# ── traffic splitting (e.g. "latest=100") ──
+traffic: "{{ lookup('env', 'CR_TRAFFIC') | default(omit) }}"
